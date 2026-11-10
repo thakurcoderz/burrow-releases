@@ -1,0 +1,183 @@
+name: Build release
+
+# Builds a Burrow release from the (private) source repository and publishes
+# it here, publicly. This repository is public, so its Actions minutes,
+# macOS included, are free.
+#  - every 30 minutes: builds the newest v* tag that has no release here yet;
+#  - or by hand: Actions → Build release → Run, for a given tag.
+#
+# Secret BURROW_SOURCE_TOKEN: a fine-grained token with read-only access to
+# Contents of thakurcoderz/burrow (to check out the source).
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build, e.g. v0.2.0 (empty = newest)"
+        required: false
+      force:
+        description: "Rebuild even if the release exists"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release
+  cancel-in-progress: false
+
+env:
+  SOURCE: thakurcoderz/burrow
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+      build: ${{ steps.t.outputs.build }}
+    steps:
+      - id: t
+        env:
+          GH_TOKEN: ${{ secrets.BURROW_SOURCE_TOKEN }}
+          OWN_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::secret BURROW_SOURCE_TOKEN is not set"; exit 1; fi
+          tag="${{ github.event.inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag=$(gh api "repos/$SOURCE/tags?per_page=100" --jq '[.[].name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(ltrimstr("v") | split(".") | map(tonumber)) | last')
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event.inputs.force }}" != "true" ] && GH_TOKEN=$OWN_TOKEN gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "build=false" >> "$GITHUB_OUTPUT"; echo "$tag is already released"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"; echo "building $tag"
+          fi
+
+  linux:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    # The oldest supported Ubuntu, so the binaries run on 22.04 and newer.
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE }}
+          ref: ${{ env.TAG }}
+          token: ${{ secrets.BURROW_SOURCE_TOKEN }}
+      - name: Check the tag matches the version
+        run: |
+          v="${TAG#v}"
+          cargo_v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          app_v=$(jq -r .version apps/burrow-ui/src-tauri/tauri.conf.json)
+          [ "$v" = "$cargo_v" ] && [ "$v" = "$app_v" ] || { echo "::error::version mismatch: $v / $cargo_v / $app_v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev libssl-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/burrow-ui/src-tauri
+      - run: cargo build --release --locked -p burrowd -p burrow
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the .deb (desktop app with burrowd and burrow inside)
+        working-directory: apps/burrow-ui
+        run: |
+          npm ci
+          npx tauri build --bundles deb
+      - name: Collect
+        run: |
+          mkdir dist
+          cp "apps/burrow-ui/src-tauri/target/release/bundle/deb/Burrow_${VERSION}_amd64.deb" dist/
+          dpkg-deb -c "dist/Burrow_${VERSION}_amd64.deb" | grep -E 'usr/bin/(burrowd|burrow|burrow-desktop)$'
+          tar -C target/release -czf "dist/burrow-${VERSION}-linux-x86_64.tar.gz" burrowd burrow
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  macos:
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    # Apple Silicon: the app with burrowd and burrow in Contents/MacOS.
+    # Ad-hoc signed (not notarized).
+    runs-on: macos-latest
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE }}
+          ref: ${{ env.TAG }}
+          token: ${{ secrets.BURROW_SOURCE_TOKEN }}
+      - run: echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/burrow-ui/src-tauri
+      - run: cargo build --release --locked -p burrowd -p burrow
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build Burrow.app and the .dmg
+        working-directory: apps/burrow-ui
+        run: |
+          npm ci
+          npx tauri build --bundles app,dmg
+      - name: Collect
+        run: |
+          mkdir dist
+          app=apps/burrow-ui/src-tauri/target/release/bundle/macos/Burrow.app
+          test -x "$app/Contents/MacOS/burrowd" && test -x "$app/Contents/MacOS/burrow"
+          cp apps/burrow-ui/src-tauri/target/release/bundle/dmg/*.dmg "dist/Burrow_${VERSION}_aarch64.dmg"
+          tar -C target/release -czf "dist/burrow-${VERSION}-macos-aarch64.tar.gz" burrowd burrow
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  publish:
+    needs: [resolve, linux, macos]
+    # Publish Linux even if the macOS build fails.
+    if: always() && needs.resolve.outputs.build == 'true' && needs.linux.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+      - name: Publish
+        run: |
+          v="${TAG#v}"
+          notes="Burrow $v.
+
+          Linux: download Burrow_${v}_amd64.deb, then
+              sudo apt install ./Burrow_${v}_amd64.deb
+              burrow setup
+
+          macOS (Apple Silicon, preview): open Burrow_${v}_aarch64.dmg and drag Burrow to Applications.
+          It isn't notarized: open it once with right-click → Open.
+
+          Docs: https://burrow-website-steel.vercel.app/docs/install/"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --title "Burrow $v" --notes "$notes"
+          fi
