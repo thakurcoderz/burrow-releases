@@ -99,7 +99,18 @@ jobs:
         run: |
           mkdir dist
           cp "apps/burrow-ui/src-tauri/target/release/bundle/deb/Burrow_${VERSION}_amd64.deb" dist/
-          dpkg-deb -c "dist/Burrow_${VERSION}_amd64.deb" | grep -E 'usr/bin/(burrowd|burrow|burrow-desktop)$'
+          deb="dist/Burrow_${VERSION}_amd64.deb"
+          # Package name: Ubuntu's archive has an unrelated `burrow` (a Kafka
+          # tool, version 1.x) that apt would "upgrade" Burrow into, removing
+          # it. Publish as `burrow-desktop`, taking over from Burrow's own old
+          # `burrow` 0.x package.
+          mkdir pkg && dpkg-deb -R "$deb" pkg
+          sed -i 's/^Package: burrow$/Package: burrow-desktop/' pkg/DEBIAN/control
+          printf 'Replaces: burrow (<< 1.0)\nBreaks: burrow (<< 1.0)\n' >> pkg/DEBIAN/control
+          dpkg-deb --root-owner-group -b pkg "$deb"
+          dpkg-deb -f "$deb" Package Version Replaces Breaks
+          [ "$(dpkg-deb -f "$deb" Package)" = burrow-desktop ]
+          dpkg-deb -c "$deb" | grep -E 'usr/bin/(burrowd|burrow|burrow-desktop)$'
           tar -C target/release -czf "dist/burrow-${VERSION}-linux-x86_64.tar.gz" burrowd burrow
       - uses: actions/upload-artifact@v4
         with:
