@@ -11,18 +11,24 @@ development environment. Get the newest version from
 - `burrow-<version>-<platform>.tar.gz`: just `burrowd` and `burrow`
 - `SHA256SUMS`: checksums of every file
 
-**macOS in one line** (Apple Silicon). Downloads the newest `.dmg`, checks its
-SHA-256, installs Burrow.app into /Applications and links the `burrow` command.
-No "Apple could not verify" prompt, because files downloaded by curl aren't
-quarantined:
+**Install or update in one line** (macOS on Apple Silicon, or Linux x86-64):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/thakurcoderz/burrow-releases/main/install.sh | sh
-burrow setup
+burrow setup   # once, the first time
 ```
 
-A specific version: `curl -fsSL …/install.sh | BURROW_VERSION=0.3.2 sh`. Running it
-again updates Burrow in place.
+The script picks the right download, checks its SHA-256 against `SHA256SUMS`,
+then installs it:
+
+- **macOS:** Burrow.app goes into /Applications and `burrow` into `/usr/local/bin`.
+  There's no "Apple could not verify" prompt, because curl downloads aren't
+  quarantined.
+- **Ubuntu/Debian:** the `.deb` (package `burrow-desktop`) via apt.
+- **Other Linux:** `burrowd` and `burrow` into `/usr/local/bin`.
+
+Running it again updates in place and restarts `burrowd`. For a specific
+version, pipe it to `BURROW_VERSION=0.3.2 sh` instead of `sh`.
 
 Install instructions: https://burrow-website-steel.vercel.app/docs/install/
 
