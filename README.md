@@ -5,7 +5,9 @@ development environment. Get the newest version from
 [Releases](https://github.com/thakurcoderz/burrow-releases/releases/latest):
 
 - `Burrow_<version>_amd64.deb`: Linux (Ubuntu 22.04+), the desktop app with `burrowd` and `burrow`
-- `Burrow_<version>_aarch64.dmg`: macOS on Apple Silicon (preview, not notarized)
+- `Burrow_<version>_aarch64.dmg`: macOS on Apple Silicon (not notarized yet: on first launch run
+  `xattr -dr com.apple.quarantine /Applications/Burrow.app`, or System Settings →
+  Privacy & Security → **Open Anyway**)
 - `burrow-<version>-<platform>.tar.gz`: just `burrowd` and `burrow`
 - `SHA256SUMS`: checksums of every file
 

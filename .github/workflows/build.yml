@@ -184,7 +184,9 @@ jobs:
               burrow setup
 
           macOS (Apple Silicon, preview): open Burrow_${v}_aarch64.dmg and drag Burrow to Applications.
-          It isn't notarized: open it once with right-click → Open.
+          It isn't notarized yet, so macOS says \"Apple could not verify Burrow\". Allow it once:
+              xattr -dr com.apple.quarantine /Applications/Burrow.app
+          or System Settings → Privacy & Security → Open Anyway.
 
           Docs: https://burrow-website-steel.vercel.app/docs/install/"
           if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
