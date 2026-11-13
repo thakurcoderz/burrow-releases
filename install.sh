@@ -70,9 +70,45 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Download with a one-line progress display on a terminal: curl runs quietly
+# in the background while we print percent and MB (curl's own bar shows a
+# bouncing animation while GitHub redirects).
+mb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1048576 }'; }
+
+download() { # url dest label
+  url=$1 dest=$2 label=$3
+  if [ ! -t 2 ]; then
+    say "$label"
+    curl -fsSL -o "$dest" "$url"
+    return
+  fi
+  total=$(curl -fsSIL "$url" 2>/dev/null | tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }')
+  curl -fsSL -o "$dest" "$url" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    have=0
+    if [ -f "$dest" ]; then have=$(wc -c < "$dest"); have=$((have + 0)); fi
+    if [ "$total" -gt 0 ]; then
+      pct=$((have * 100 / total))
+      printf '\r%s  %3d%%  %s / %s MB ' "$label" "$pct" "$(mb "$have")" "$(mb "$total")" >&2
+    else
+      printf '\r%s  %s MB ' "$label" "$(mb "$have")" >&2
+    fi
+    sleep 0.2 2>/dev/null || sleep 1
+  done
+  status=0
+  wait "$pid" || status=$?
+  if [ "$status" -eq 0 ]; then
+    have=$(wc -c < "$dest")
+    printf '\r%s  100%%  %s MB, done.\n' "$label" "$(mb "$((have + 0))")" >&2
+  else
+    printf '\n' >&2
+  fi
+  return "$status"
+}
+
 # Download and verify.
-say "Downloading Burrow $version ($file)…"
-curl -fL --progress-bar -o "$tmp/$file" "$base/$file" || fail "download failed: $base/$file"
+download "$base/$file" "$tmp/$file" "Downloading Burrow $version ($file)" || fail "download failed: $base/$file"
 curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS" || fail "couldn't download SHA256SUMS"
 want=$(awk -v f="$file" '$2 == f || $2 == "*" f { print $1 }' "$tmp/SHA256SUMS" | head -n 1)
 [ -n "$want" ] || fail "$file isn't listed in SHA256SUMS"
