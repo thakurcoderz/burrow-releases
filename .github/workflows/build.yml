@@ -183,7 +183,7 @@ jobs:
               sudo apt install ./Burrow_${v}_amd64.deb
               burrow setup
 
-          macOS (Apple Silicon, preview): open Burrow_${v}_aarch64.dmg and drag Burrow to Applications.
+          macOS (Apple Silicon): open Burrow_${v}_aarch64.dmg and drag Burrow to Applications.
           It isn't notarized yet, so macOS says \"Apple could not verify Burrow\". Allow it once:
               xattr -dr com.apple.quarantine /Applications/Burrow.app
           or System Settings → Privacy & Security → Open Anyway.
