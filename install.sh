@@ -83,7 +83,7 @@ download() { # url dest label
     return
   fi
   total=$(curl -fsSIL "$url" 2>/dev/null | tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }')
-  curl -fsSL -o "$dest" "$url" &
+  curl -fsSL -o "$dest" "$url" 2>"$dest.err" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     have=0
@@ -103,7 +103,9 @@ download() { # url dest label
     printf '\r%s  100%%  %s MB, done.\n' "$label" "$(mb "$((have + 0))")" >&2
   else
     printf '\n' >&2
+    cat "$dest.err" >&2 2>/dev/null || true
   fi
+  rm -f "$dest.err"
   return "$status"
 }
 
